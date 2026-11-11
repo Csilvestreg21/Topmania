@@ -161,7 +161,7 @@ const T=[
 ].map(([id,f,d,c,t])=>({id,f,d,c:!!c,t}));
 
 const COLS=[["todo","Por hacer"],["doing","En proceso"],["done","Hecho"]];
-const state={}; let filtro="all"; let db=null;
+const state={}; let filtro="all";
 const LS="topmania-tablero";
 function loadLocal(){try{Object.assign(state,JSON.parse(localStorage.getItem(LS)||"{}"))}catch(e){}}
 function saveLocal(){try{localStorage.setItem(LS,JSON.stringify(state))}catch(e){}}
@@ -209,23 +209,50 @@ function render(){
   });
 }
 function btn(t,f){const b=document.createElement("button");b.className="mv";b.textContent=t;b.onclick=f;return b}
+// ▼▼▼ PEGA AQUÍ ENTRE LAS COMILLAS LA URL DE TU APPS SCRIPT (termina en /exec) ▼▼▼
+const API_URL = "https://script.google.com/macros/s/AKfycbxK1zsUpXQPJFkdTSvhibih8rkxy_H4QF181i9U_tmIKpBqksenXjABPVD2nNugtyO1/exec";
+// ▲▲▲ ─────────────────────────────────────────────────────────────────────── ▲▲▲
+
+function nota(t){document.getElementById("syncNote").textContent=t}
+async function api(params){
+  const u=new URL(API_URL); Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,v));
+  const r=await fetch(u.toString(),{redirect:"follow"});
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+function aplicar(remoto){
+  if(!remoto||typeof remoto!=="object") return;
+  Object.entries(remoto).forEach(([id,s])=>{if(["todo","doing","done"].includes(s)) state[id]=s});
+  saveLocal(); render();
+}
+async function cargar(){
+  if(!API_URL) return;
+  try{ aplicar(await api()); nota("Avance en línea · actualizado "+new Date().toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"})); }
+  catch(e){ nota("No se pudo cargar el avance en línea. Se muestra el de este navegador."); }
+}
 async function move(id,s){
   const prev=st(id); state[id]=s; saveLocal(); render();
-  if(db){try{await db.collection("estado").doc(id).set({s,at:Date.now()})}
-  catch(e){state[id]=prev;saveLocal();render();syncNote.textContent="No se pudo guardar el cambio. Revisa tu conexión e inténtalo de nuevo."}}
+  if(!API_URL) return;
+  nota("Guardando…");
+  try{
+    const tarea=(T.find(x=>x.id===id)||{}).t||"";
+    aplicar(await api({id,s,t:tarea}));
+    nota("Guardado en línea · "+new Date().toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"}));
+  }catch(e){
+    state[id]=prev; saveLocal(); render();
+    nota("No se pudo guardar el cambio. Revisa tu conexión e inténtalo de nuevo.");
+  }
 }
 
 loadLocal(); render();
-(async()=>{
-  try{db=await window.claude?.use?.("db")}catch(e){db=null}
-  if(!db){syncNote.textContent="El avance se guarda solo en este navegador.";return}
-  const timer=setTimeout(()=>{syncNote.textContent="El avance está tardando en cargar; tus cambios se guardan igual."},10000);
-  db.collection("estado").onSnapshot(snap=>{
-    clearTimeout(timer);
-    snap.docs.forEach(d=>{const v=d.data();if(v&&v.s)state[d.id]=v.s});
-    saveLocal();render();syncNote.textContent="El avance se guarda automáticamente.";
-  },()=>{clearTimeout(timer);syncNote.textContent="No se pudo cargar el avance guardado; se muestra el de este navegador."});
-})();
+if(API_URL){
+  nota("Cargando el avance en línea…");
+  cargar();
+  setInterval(cargar,30000);
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden)cargar()});
+}else{
+  nota("El avance se guarda solo en este navegador. Para guardarlo en línea, pega la URL de Apps Script en API_URL.");
+}
 </script>
 
 </body></html>
